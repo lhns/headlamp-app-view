@@ -16,7 +16,7 @@ import {
 import { Box, Link as MuiLink } from '@mui/material';
 import React from 'react';
 import { AppSummary, INSTANCE_LABEL, listApps, summarize } from './api';
-import { healthStatus } from './columns';
+import { fillTracks, healthStatus, TRACK } from './columns';
 import { NamespaceLinks } from './links';
 
 export function AppsList() {
@@ -49,9 +49,10 @@ export function AppsList() {
         <SimpleTable
           rowsPerPage={[50, 100]}
           emptyMessage={`No resources labelled ${INSTANCE_LABEL} were found.`}
-          columns={[
+          columns={fillTracks([
             {
               label: 'App',
+              gridTemplate: TRACK.name,
               getter: (a: AppSummary) => (
                 <Link routeName="app-detail" params={{ name: a.name }}>
                   {a.name}
@@ -72,6 +73,7 @@ export function AppsList() {
             { label: 'Resources', getter: (a: AppSummary) => a.resourceCount },
             {
               label: 'URL',
+              gridTemplate: TRACK.wide,
               getter: (a: AppSummary) =>
                 a.ingressUrls.length ? (
                   <Box>
@@ -89,13 +91,15 @@ export function AppsList() {
             },
             {
               label: 'Namespace',
+              gridTemplate: TRACK.namespace,
               getter: (a: AppSummary) => <NamespaceLinks names={a.namespaces} />,
             },
             {
               label: 'Age',
+              gridTemplate: TRACK.age,
               getter: (a: AppSummary) => (a.oldest ? <DateLabel date={a.oldest} /> : '—'),
             },
-          ]}
+          ])}
           data={apps}
         />
       )}

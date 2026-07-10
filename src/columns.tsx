@@ -14,6 +14,29 @@ import { NamespaceLink, ResourceLink } from './links';
 export interface Column {
   label: string;
   getter: (r: AppResource) => React.ReactNode;
+  /** Grid track for this column (SimpleTable's `gridTemplate`). */
+  gridTemplate?: number | string;
+}
+
+/*
+ * SimpleTable lays each column out as a CSS-grid track (`gridTemplate`), defaulting
+ * to `1fr` — with no floor, columns squish to unreadable widths and wrap. `minmax()`
+ * gives a real minimum while still flexing via the fr weight. When the minimums sum
+ * past the viewport the table scrolls horizontally *inside its own container*
+ * (SimpleTable wraps the grid in an `overflow-x: auto` TableContainer), so the page
+ * layout never breaks.
+ */
+export const TRACK = {
+  name: 'minmax(180px, 2fr)',
+  namespace: 'minmax(120px, 1.2fr)',
+  wide: 'minmax(160px, 1.6fr)', // ports, hosts, URLs — can be long
+  age: 'minmax(96px, 0.7fr)',
+};
+const DEFAULT_TRACK = 'minmax(100px, 1fr)';
+
+/** Give every column a minimum width, defaulting the ones that didn't set one. */
+export function fillTracks<T extends { gridTemplate?: number | string }>(cols: T[]): T[] {
+  return cols.map(c => (c.gridTemplate === undefined ? { ...c, gridTemplate: DEFAULT_TRACK } : c));
 }
 
 export function healthStatus(h: Health): 'success' | 'warning' | 'error' | '' {
@@ -47,15 +70,21 @@ export function readyText(r: AppResource): string {
   return '';
 }
 
-const nameCol: Column = { label: 'Name', getter: r => <ResourceLink item={r} /> };
+const nameCol: Column = {
+  label: 'Name',
+  getter: r => <ResourceLink item={r} />,
+  gridTemplate: TRACK.name,
+};
 const nsCol: Column = {
   label: 'Namespace',
   getter: r => (r.metadata?.namespace ? <NamespaceLink name={r.metadata.namespace} /> : '—'),
+  gridTemplate: TRACK.namespace,
 };
 const ageCol: Column = {
   label: 'Age',
   getter: r =>
     r.metadata?.creationTimestamp ? <DateLabel date={r.metadata.creationTimestamp} /> : '—',
+  gridTemplate: TRACK.age,
 };
 
 const dash = (v: React.ReactNode) => (v === undefined || v === null || v === '' ? '—' : v);
@@ -151,14 +180,14 @@ const BY_KIND: Record<string, Column[]> = {
     nsCol,
     { label: 'Type', getter: r => dash(r.spec?.type) },
     { label: 'Cluster IP', getter: r => dash(r.spec?.clusterIP) },
-    { label: 'Ports', getter: r => dash(servicePorts(r)) },
+    { label: 'Ports', getter: r => dash(servicePorts(r)), gridTemplate: TRACK.wide },
     ageCol,
   ],
   Ingress: [
     nameCol,
     nsCol,
     { label: 'Class', getter: r => dash(r.spec?.ingressClassName) },
-    { label: 'Hosts', getter: r => dash(ingressHosts(r)) },
+    { label: 'Hosts', getter: r => dash(ingressHosts(r)), gridTemplate: TRACK.wide },
     ageCol,
   ],
   PersistentVolumeClaim: [
@@ -201,5 +230,5 @@ export function columnsForKind(kind: string): Column[] {
 export function columnsForRows(kind: string, rows: AppResource[]): Column[] {
   const cols = columnsForKind(kind);
   const anyNamespaced = rows.some(r => r.metadata?.namespace);
-  return anyNamespaced ? cols : cols.filter(c => c.label !== 'Namespace');
+  return fillTracks(anyNamespaced ? cols : cols.filter(c => c.label !== 'Namespace'));
 }

@@ -15,6 +15,10 @@ All notable changes to this project are documented here. The format is based on
   one app; if two apps reach it, it's dropped (no ambiguous grouping). Ownership
   relations (Pods/ReplicaSets) are cached far longer than resource bodies, since
   `ownerReferences` are immutable.
+- Table columns now have real **minimum widths** (Name/Namespace/URL/Ports/Hosts
+  wider) instead of squishing to unreadable widths. When the minimums exceed the
+  viewport the table scrolls horizontally within its own container, so the page
+  layout never breaks.
 
 ### Added
 - Unit tests (Vitest) for the ownership resolver, run in CI.
