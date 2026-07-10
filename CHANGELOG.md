@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format is based on
 ### Added
 - Namespaces are now clickable links (to the namespace's details page) in the
   Apps list, the per-app summary, and the per-kind resource tables.
+- The app URL now links to the ingress **path** when there is a real subpath
+  (so it opens the right place), while the label stays the bare host to keep rows
+  compact.
 
 ### Fixed
 - Skip aggregated/virtual API groups during discovery — their objects (e.g.

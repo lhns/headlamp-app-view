@@ -340,16 +340,35 @@ function podIsBroken(pod: AppResource): boolean {
   );
 }
 
-/** Ingress hosts → https URLs (best-effort). */
-export function ingressUrls(resources: AppResource[]): string[] {
-  const urls = new Set<string>();
+/** An app entry point: the full URL (host + path, for the link) and the host (compact label). */
+export interface IngressUrl {
+  url: string;
+  host: string;
+}
+
+/**
+ * Ingress rules → entry-point URLs (best-effort, https). The link target keeps
+ * the ingress path when it's a real subpath (so it opens the right place), but
+ * the label stays the bare host to keep table rows compact. One URL per host:
+ * the root if the ingress serves `/`, otherwise its first non-root path.
+ */
+export function ingressUrls(resources: AppResource[]): IngressUrl[] {
+  const seen = new Set<string>();
+  const out: IngressUrl[] = [];
   for (const r of resources) {
     if (r.kind !== 'Ingress') continue;
     for (const rule of r.spec?.rules ?? []) {
-      if (rule.host) urls.add(`https://${rule.host}`);
+      if (!rule.host) continue;
+      const paths = (rule.http?.paths ?? []).map((p: any) => p.path).filter(Boolean) as string[];
+      const hasRoot = paths.length === 0 || paths.some(p => p === '/');
+      const path = hasRoot ? '' : paths[0];
+      const url = `https://${rule.host}${path}`;
+      if (seen.has(url)) continue;
+      seen.add(url);
+      out.push({ url, host: rule.host });
     }
   }
-  return Array.from(urls);
+  return out;
 }
 
 export type Health = 'Healthy' | 'Progressing' | 'Degraded' | 'Unknown';
@@ -360,7 +379,7 @@ export interface AppSummary {
   resourceCount: number;
   podsTotal: number;
   podsReady: number;
-  ingressUrls: string[];
+  ingressUrls: IngressUrl[];
   namespaces: string[];
   health: Health;
   oldest?: string;

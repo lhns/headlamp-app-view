@@ -76,9 +76,9 @@ export function AppsList() {
                 a.ingressUrls.length ? (
                   <Box>
                     {a.ingressUrls.map(u => (
-                      <Box key={u}>
-                        <MuiLink href={u} target="_blank" rel="noopener noreferrer">
-                          {u.replace(/^https?:\/\//, '')}
+                      <Box key={u.url}>
+                        <MuiLink href={u.url} target="_blank" rel="noopener noreferrer">
+                          {u.host}
                         </MuiLink>
                       </Box>
                     ))}

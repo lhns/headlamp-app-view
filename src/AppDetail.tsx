@@ -76,9 +76,9 @@ export function AppDetail() {
       value: summary.ingressUrls.length ? (
         <Box>
           {summary.ingressUrls.map(u => (
-            <Box key={u}>
-              <MuiLink href={u} target="_blank" rel="noopener noreferrer">
-                {u.replace(/^https?:\/\//, '')}
+            <Box key={u.url}>
+              <MuiLink href={u.url} target="_blank" rel="noopener noreferrer">
+                {u.host}
               </MuiLink>
             </Box>
           ))}
