@@ -340,6 +340,13 @@ function workloadSignal(r: AppResource): Signal | null {
   return ready === 0 ? 'broken' : ready < desired ? 'progressing' : 'ok';
 }
 
+/** Health signal from a single pod. Completed pods (Succeeded, e.g. a Job) don't count. */
+function podSignal(pod: AppResource): Signal | null {
+  if (pod.status?.phase === 'Succeeded') return null;
+  if (podIsBroken(pod)) return 'broken';
+  return isPodReady(pod) ? 'ok' : 'progressing';
+}
+
 /** Roll a set of an app's resources up into the summary shown on the Apps list. */
 export function summarize(name: string, resources: AppResource[]): AppSummary {
   const pods = resources.filter(r => r.kind === 'Pod');
@@ -351,15 +358,17 @@ export function summarize(name: string, resources: AppResource[]): AppSummary {
   const timestamps = resources.map(r => r.metadata?.creationTimestamp).filter(Boolean) as string[];
   const oldest = timestamps.length ? timestamps.reduce((a, b) => (a < b ? a : b)) : undefined;
 
-  // Health rollup across both pods and workload controllers (Deployment/
-  // StatefulSet/DaemonSet). Worst signal wins: any broken -> Degraded, any not
-  // fully ready -> Progressing, all ready -> Healthy, nothing to rate -> Unknown.
-  const signals: Signal[] = [];
-  for (const p of pods) signals.push(podIsBroken(p) ? 'broken' : isPodReady(p) ? 'ok' : 'progressing');
-  for (const r of resources) {
-    const s = workloadSignal(r);
-    if (s) signals.push(s);
-  }
+  // Health rollup: prefer workload controllers (Deployment/StatefulSet/DaemonSet)
+  // — their ready/desired already accounts for pod health — and fall back to raw
+  // pod status only when the app has no such controller (e.g. CNPG-managed pods).
+  // Worst signal wins: any broken -> Degraded, any not-ready -> Progressing,
+  // all ready -> Healthy, nothing to rate -> Unknown.
+  const controllerSignals = resources
+    .map(workloadSignal)
+    .filter((s): s is Signal => s !== null);
+  const signals = controllerSignals.length
+    ? controllerSignals
+    : pods.map(podSignal).filter((s): s is Signal => s !== null);
   let health: Health = 'Unknown';
   if (signals.length > 0) {
     if (signals.includes('broken')) health = 'Degraded';
