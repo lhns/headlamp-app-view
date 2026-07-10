@@ -6,12 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 ### Fixed
-- Skip aggregated/virtual API groups (`metrics.k8s.io`, `custom.metrics.k8s.io`,
-  `external.metrics.k8s.io`) during discovery. Their objects (e.g. `PodMetrics`)
-  mirror a pod's labels and so were swept into apps, but they have no CRD/details
-  view — clicking one opened a blank panel.
-- Drop superseded ReplicaSets (old Deployment revisions kept for rollback,
-  scaled to `0/0`) from apps — they were cluttering the resource list.
+- Skip aggregated/virtual API groups during discovery — their objects (e.g.
+  `metrics.k8s.io` `PodMetrics`) mirror a pod's labels and were swept into apps,
+  but have no CRD/details view, so clicking one opened a blank panel. Aggregated
+  groups are now **detected automatically** from the APIService registry (an
+  `APIService` with a `spec.service`), with a static fallback (`metrics.k8s.io`,
+  `custom.metrics.k8s.io`, `external.metrics.k8s.io`) for view-only identities.
+- Drop rollout-history bookkeeping from apps — superseded ReplicaSets (old
+  Deployment revisions scaled to `0/0`) and ControllerRevisions (StatefulSet/
+  DaemonSet revision snapshots) — which cluttered the resource list.
 
 ## [0.1.0] - 2026-07-10
 ### Added

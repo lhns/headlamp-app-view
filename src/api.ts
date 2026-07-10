@@ -48,12 +48,35 @@ const DISCOVERY_TTL_MS = 60_000;
  * but they aren't backed by a CRD/etcd object, so Headlamp has no details view
  * for them (a click opens a blank panel). They're derived data, not app
  * resources, so we drop them from discovery entirely.
+ *
+ * Aggregated groups are detected automatically from the APIService registry (see
+ * aggregatedGroups); this static list is a fallback for when that registry isn't
+ * readable (e.g. a view-only identity).
  */
-const EXCLUDED_GROUPS = new Set([
+const EXCLUDED_GROUPS_FALLBACK = new Set([
   'metrics.k8s.io',
   'custom.metrics.k8s.io',
   'external.metrics.k8s.io',
 ]);
+
+/**
+ * API groups served by an aggregated (external) apiserver rather than by
+ * kube-apiserver itself — an APIService with a `spec.service` set. These are the
+ * metrics-style virtual APIs with no CRD/details view. Empty if the APIService
+ * registry can't be read.
+ */
+async function aggregatedGroups(): Promise<Set<string>> {
+  const groups = new Set<string>();
+  try {
+    const svcs = await request('/apis/apiregistration.k8s.io/v1/apiservices');
+    for (const s of svcs?.items ?? []) {
+      if (s.spec?.service && s.spec?.group) groups.add(s.spec.group);
+    }
+  } catch (e) {
+    // not readable (e.g. view-only) — caller falls back to the static list
+  }
+  return groups;
+}
 
 /**
  * Enumerate every listable, non-subresource kind the API server exposes — core,
@@ -83,6 +106,9 @@ export async function discover(): Promise<ApiResource[]> {
     // core group unreadable — unlikely; carry on
   }
 
+  // Auto-detected aggregated groups, plus the static fallback.
+  const excluded = new Set([...EXCLUDED_GROUPS_FALLBACK, ...(await aggregatedGroups())]);
+
   try {
     const groups = await request('/apis');
     await Promise.all(
@@ -91,7 +117,7 @@ export async function discover(): Promise<ApiResource[]> {
           g.preferredVersion?.groupVersion || g.versions?.[0]?.groupVersion;
         if (!gv || !gv.includes('/')) return;
         const [group, version] = gv.split('/');
-        if (EXCLUDED_GROUPS.has(group)) return;
+        if (excluded.has(group)) return;
         try {
           collect(group, version, await request(`/apis/${group}/${version}`));
         } catch (e) {
@@ -233,7 +259,7 @@ export async function listApps(force = false): Promise<Map<string, AppResource[]
   for (const r of resources) {
     const app = instanceOf(r);
     if (!app) continue;
-    if (isSupersededReplicaSet(r)) continue;
+    if (isRolloutHistory(r)) continue;
     if (r.metadata?.uid) seen.add(r.metadata.uid);
     const list = groups.get(app) ?? [];
     if (!groups.has(app)) groups.set(app, list);
@@ -271,11 +297,14 @@ export function instanceOf(r: AppResource): string | undefined {
 }
 
 /**
- * A superseded ReplicaSet — an old Deployment revision kept for rollback history
- * (spec.replicas 0 and no live pods). Deployments hoard up to revisionHistoryLimit
- * of these, which just clutters an app view, so we drop them.
+ * Rollout-history bookkeeping that clutters an app view rather than describing
+ * it: a superseded ReplicaSet (an old Deployment revision, scaled to 0/0 with no
+ * live pods) or a ControllerRevision (StatefulSet/DaemonSet revision snapshots).
+ * Kubernetes keeps up to revisionHistoryLimit of these for rollback; they aren't
+ * something you manage per-app, so we drop them.
  */
-function isSupersededReplicaSet(r: AppResource): boolean {
+function isRolloutHistory(r: AppResource): boolean {
+  if (r.kind === 'ControllerRevision') return true;
   return (
     r.kind === 'ReplicaSet' &&
     (r.spec?.replicas ?? 0) === 0 &&
