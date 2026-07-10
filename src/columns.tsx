@@ -9,7 +9,7 @@
 import { DateLabel } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import React from 'react';
 import { AppResource, Health } from './api';
-import { ResourceLink } from './links';
+import { NamespaceLink, ResourceLink } from './links';
 
 export interface Column {
   label: string;
@@ -48,7 +48,10 @@ export function readyText(r: AppResource): string {
 }
 
 const nameCol: Column = { label: 'Name', getter: r => <ResourceLink item={r} /> };
-const nsCol: Column = { label: 'Namespace', getter: r => r.metadata?.namespace ?? '—' };
+const nsCol: Column = {
+  label: 'Namespace',
+  getter: r => (r.metadata?.namespace ? <NamespaceLink name={r.metadata.namespace} /> : '—'),
+};
 const ageCol: Column = {
   label: 'Age',
   getter: r =>

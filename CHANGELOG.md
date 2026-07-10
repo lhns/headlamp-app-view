@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added
+- Namespaces are now clickable links (to the namespace's details page) in the
+  Apps list, the per-app summary, and the per-kind resource tables.
+
 ### Fixed
 - Skip aggregated/virtual API groups during discovery — their objects (e.g.
   `metrics.k8s.io` `PodMetrics`) mirror a pod's labels and were swept into apps,

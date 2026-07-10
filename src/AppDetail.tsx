@@ -19,6 +19,7 @@ import React from 'react';
 import { useParams } from 'react-router-dom';
 import { AppResource, groupByKind, listApps, orderKinds, summarize } from './api';
 import { columnsForRows, healthStatus } from './columns';
+import { NamespaceLinks } from './links';
 
 const appsListUrl = Router.createRouteURL('apps');
 
@@ -69,7 +70,7 @@ export function AppDetail() {
       value: summary.podsTotal ? `${summary.podsReady}/${summary.podsTotal}` : '—',
     },
     { name: 'Resources', value: String(summary.resourceCount) },
-    { name: 'Namespaces', value: summary.namespaces.join(', ') || '—' },
+    { name: 'Namespaces', value: <NamespaceLinks names={summary.namespaces} /> },
     {
       name: 'URL',
       value: summary.ingressUrls.length ? (

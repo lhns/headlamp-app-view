@@ -17,6 +17,7 @@ import { Box, Link as MuiLink } from '@mui/material';
 import React from 'react';
 import { AppSummary, INSTANCE_LABEL, listApps, summarize } from './api';
 import { healthStatus } from './columns';
+import { NamespaceLinks } from './links';
 
 export function AppsList() {
   const [apps, setApps] = React.useState<AppSummary[] | null>(null);
@@ -86,7 +87,10 @@ export function AppsList() {
                   '—'
                 ),
             },
-            { label: 'Namespace', getter: (a: AppSummary) => a.namespaces.join(', ') || '—' },
+            {
+              label: 'Namespace',
+              getter: (a: AppSummary) => <NamespaceLinks names={a.namespaces} />,
+            },
             {
               label: 'Age',
               getter: (a: AppSummary) => (a.oldest ? <DateLabel date={a.oldest} /> : '—'),
