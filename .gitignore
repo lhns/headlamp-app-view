@@ -1,0 +1,13 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# packaged plugin
+*.tar.gz
+*.tgz
+
+# misc
+.DS_Store
+npm-debug.log*
