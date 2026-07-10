@@ -15,20 +15,8 @@ import {
 } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Box, Link as MuiLink } from '@mui/material';
 import React from 'react';
-import { AppSummary, Health, INSTANCE_LABEL, listApps, summarize } from './api';
-
-function healthStatus(h: Health): 'success' | 'warning' | 'error' | '' {
-  switch (h) {
-    case 'Healthy':
-      return 'success';
-    case 'Progressing':
-      return 'warning';
-    case 'Degraded':
-      return 'error';
-    default:
-      return '';
-  }
-}
+import { AppSummary, INSTANCE_LABEL, listApps, summarize } from './api';
+import { healthStatus } from './columns';
 
 export function AppsList() {
   const [apps, setApps] = React.useState<AppSummary[] | null>(null);
