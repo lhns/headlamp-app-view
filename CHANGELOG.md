@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Changed
+- App enrichment now resolves the ownership graph in **both** directions —
+  unlabelled parents above labelled resources (a CNPG `Cluster`) *and* unlabelled
+  children below them (a Deployment's pods) — via a cycle-safe union-find. An
+  unlabelled object is attached only when its ownership component maps to exactly
+  one app; if two apps reach it, it's dropped (no ambiguous grouping). Ownership
+  relations (Pods/ReplicaSets) are cached far longer than resource bodies, since
+  `ownerReferences` are immutable.
+
+### Added
+- Unit tests (Vitest) for the ownership resolver, run in CI.
 
 ## [0.2.0] - 2026-07-10
 ### Added

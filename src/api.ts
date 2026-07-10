@@ -6,6 +6,7 @@
  * label-filtered listing, so an "app" can be assembled from all of its resources.
  */
 import { request } from '@kinvolk/headlamp-plugin/lib/ApiProxy';
+import { OwnershipNode, resolveOwnership } from './ownership';
 
 export const INSTANCE_LABEL = 'app.kubernetes.io/instance';
 export const VERSION_LABEL = 'app.kubernetes.io/version';
@@ -207,9 +208,7 @@ async function resolveKind(apiVersion: string, kind: string): Promise<ApiResourc
   );
 }
 
-const ownerCache = new Map<string, AppResource | null>();
-
-/** Fetch a single object referenced by an ownerReference; null if gone/unreadable. Cached by path. */
+/** Fetch a single object referenced by an ownerReference; null if gone/unreadable. */
 async function fetchOwner(ref: any, childNamespace?: string): Promise<AppResource | null> {
   if (!ref?.kind || !ref?.name) return null;
   const rk = await resolveKind(ref.apiVersion || 'v1', ref.kind);
@@ -218,75 +217,217 @@ async function fetchOwner(ref: any, childNamespace?: string): Promise<AppResourc
   const path = rk.namespaced
     ? `${base}/namespaces/${childNamespace}/${rk.plural}/${ref.name}`
     : `${base}/${rk.plural}/${ref.name}`;
-  if (ownerCache.has(path)) return ownerCache.get(path)!;
-
-  let obj: AppResource | null = null;
   try {
     const it = await request(path);
-    if (it?.metadata) {
-      obj = {
-        ...it,
-        kind: it.kind || rk.kind,
-        apiVersion: it.apiVersion || (rk.group ? `${rk.group}/${rk.version}` : rk.version),
-        group: rk.group,
-        plural: rk.plural,
-      };
-    }
+    if (!it?.metadata) return null;
+    return {
+      ...it,
+      kind: it.kind || rk.kind,
+      apiVersion: it.apiVersion || (rk.group ? `${rk.group}/${rk.version}` : rk.version),
+      group: rk.group,
+      plural: rk.plural,
+    };
   } catch (e) {
-    obj = null; // 403 / 404 — skip
+    return null; // 403 / 404 — skip
   }
-  ownerCache.set(path, obj);
-  return obj;
+}
+
+/**
+ * Ownership edges for workload children (Pods, ReplicaSets) — the links that
+ * connect an unlabelled pod up to its labelled controller. ownerReferences are
+ * immutable for an object's lifetime, so these RELATIONS are cached far longer
+ * than the app data; only edges + identity are kept here, never bodies.
+ */
+interface ChildRel {
+  ownerRefs: any[];
+  kind: string;
+  group: string;
+  version: string;
+  plural: string;
+  namespace?: string;
+  name: string;
+}
+
+const CHILD_KINDS = [
+  { base: '/api/v1', kind: 'Pod', group: '', version: 'v1', plural: 'pods' },
+  { base: '/apis/apps/v1', kind: 'ReplicaSet', group: 'apps', version: 'v1', plural: 'replicasets' },
+];
+
+let relationCache: { at: number; rels: Map<string, ChildRel> } | null = null;
+const RELATION_TTL_MS = 10 * 60_000; // ownerReferences never change; refresh occasionally
+
+async function childRelations(force = false): Promise<Map<string, ChildRel>> {
+  if (!force && relationCache && Date.now() - relationCache.at < RELATION_TTL_MS) {
+    return relationCache.rels;
+  }
+  const rels = new Map<string, ChildRel>();
+  await pMap(
+    CHILD_KINDS,
+    async k => {
+      try {
+        const resp = await request(`${k.base}/${k.plural}`);
+        for (const it of resp?.items ?? []) {
+          const uid = it.metadata?.uid;
+          if (!uid) continue;
+          if (isRolloutHistory({ ...it, kind: it.kind || k.kind } as AppResource)) continue;
+          rels.set(uid, {
+            ownerRefs: it.metadata?.ownerReferences ?? [],
+            kind: k.kind,
+            group: k.group,
+            version: k.version,
+            plural: k.plural,
+            namespace: it.metadata?.namespace,
+            name: it.metadata?.name,
+          });
+        }
+      } catch (e) {
+        // not listable for us — skip
+      }
+    },
+    CHILD_KINDS.length
+  );
+  relationCache = { at: Date.now(), rels };
+  return rels;
+}
+
+/** Fetch one namespaced object's current body by identity (for a child we attach). */
+async function fetchBody(r: ChildRel): Promise<AppResource | null> {
+  const base = r.group ? `/apis/${r.group}/${r.version}` : `/api/${r.version}`;
+  try {
+    const it = await request(`${base}/namespaces/${r.namespace}/${r.plural}/${r.name}`);
+    if (!it?.metadata) return null;
+    return {
+      ...it,
+      kind: it.kind || r.kind,
+      apiVersion: it.apiVersion || (r.group ? `${r.group}/${r.version}` : r.version),
+      group: r.group,
+      plural: r.plural,
+    };
+  } catch (e) {
+    return null;
+  }
 }
 
 let appsCache: { at: number; data: Map<string, AppResource[]> } | null = null;
-const OWNER_WALK_BUDGET = 50; // max owner fetches per app, a runaway guard
+const OWNER_FETCH_BUDGET = 200; // total up-owner fetches per build, a runaway guard
+
+interface GraphNode {
+  ownerRefs: any[];
+  ns?: string;
+  app?: string; // set when the object itself carries the instance label
+  res?: AppResource; // the body, when we have one
+  rel?: ChildRel; // identity to fetch a body on demand (down-children)
+}
 
 /**
- * The apps, keyed by instance label, each enriched by walking ownerReferences
- * upward to include unlabelled parents (e.g. a CNPG Cluster owning labelled
- * pods). Owners already present via their own label are not refetched.
+ * The apps, keyed by instance label. Each is enriched by resolving the ownership
+ * graph in BOTH directions: unlabelled parents above labelled resources (a CNPG
+ * Cluster over labelled pods) and unlabelled children below them (a labelled
+ * Deployment's pods). An unlabelled object is attached to an app only if its
+ * ownership component resolves to exactly ONE app — if two apps reach it, it's
+ * ambiguous and dropped. Resolution is a union-find over the edges, so a cycle
+ * just collapses into one component (no recursion, O(V+E), can't loop).
  */
 export async function listApps(force = false): Promise<Map<string, AppResource[]>> {
   if (!force && appsCache && Date.now() - appsCache.at < INSTANCES_TTL_MS) {
     return appsCache.data;
   }
 
-  const resources = await listInstances(force);
-  const groups = new Map<string, AppResource[]>();
-  const seen = new Set<string>(); // uids already attributed to some app
+  const labelled = await listInstances(force);
+  const childRels = await childRelations(force);
 
-  for (const r of resources) {
-    const app = instanceOf(r);
-    if (!app) continue;
+  const nodes = new Map<string, GraphNode>();
+  const ensure = (uid: string): GraphNode => {
+    let n = nodes.get(uid);
+    if (!n) {
+      n = { ownerRefs: [] };
+      nodes.set(uid, n);
+    }
+    return n;
+  };
+
+  // Labelled resources: body + app, from the fresh sweep.
+  for (const r of labelled) {
     if (isRolloutHistory(r)) continue;
-    if (r.metadata?.uid) seen.add(r.metadata.uid);
-    const list = groups.get(app) ?? [];
-    if (!groups.has(app)) groups.set(app, list);
-    list.push(r);
+    const app = instanceOf(r);
+    const uid = r.metadata?.uid;
+    if (!app || !uid) continue;
+    const n = ensure(uid);
+    n.app = app;
+    n.res = r;
+    n.ns = r.metadata?.namespace;
+    n.ownerRefs = r.metadata?.ownerReferences ?? [];
   }
 
-  for (const list of groups.values()) {
-    const queue = [...list];
-    let budget = OWNER_WALK_BUDGET;
-    while (queue.length && budget > 0) {
-      const cur = queue.shift()!;
-      for (const ref of cur.metadata?.ownerReferences ?? []) {
-        if (ref.uid && seen.has(ref.uid)) continue; // already have it (likely labelled itself)
-        if (budget <= 0) break;
-        budget--;
-        const owner = await fetchOwner(ref, cur.metadata?.namespace);
-        const ouid = owner?.metadata?.uid;
-        if (!owner || (ouid && seen.has(ouid))) {
-          if (ref.uid) seen.add(ref.uid);
-          continue;
+  // Workload children: ownership edges only (bodies fetched later iff attached).
+  for (const [uid, rel] of childRels) {
+    const n = ensure(uid);
+    if (!n.ownerRefs.length) n.ownerRefs = rel.ownerRefs;
+    if (n.ns === undefined) n.ns = rel.namespace;
+    if (!n.rel) n.rel = rel;
+  }
+
+  // Up-owners: fetch owners referenced by known nodes but not yet present (e.g. a
+  // CNPG Cluster). Each uid is fetched at most once, so a reference cycle can't
+  // spin — the nodes map is the visited set.
+  let budget = OWNER_FETCH_BUDGET;
+  let frontier = [...nodes.keys()];
+  while (frontier.length && budget > 0) {
+    const wanted = new Map<string, { ref: any; ns?: string }>();
+    for (const uid of frontier) {
+      const n = nodes.get(uid)!;
+      for (const ref of n.ownerRefs) {
+        if (ref?.uid && !nodes.has(ref.uid) && !wanted.has(ref.uid)) {
+          wanted.set(ref.uid, { ref, ns: n.ns });
         }
-        if (ouid) seen.add(ouid);
-        list.push(owner);
-        queue.push(owner); // keep walking up (parent's parent, …)
       }
     }
+    if (!wanted.size) break;
+    const items = [...wanted.values()].slice(0, budget);
+    budget -= items.length;
+    const fetched = await pMap(items, t => fetchOwner(t.ref, t.ns), 10);
+    const next: string[] = [];
+    for (const owner of fetched) {
+      const uid = owner?.metadata?.uid;
+      if (!owner || !uid || nodes.get(uid)?.res) continue;
+      const n = ensure(uid);
+      n.res = owner;
+      n.app = instanceOf(owner);
+      n.ns = owner.metadata?.namespace;
+      n.ownerRefs = owner.metadata?.ownerReferences ?? [];
+      next.push(uid);
+    }
+    frontier = next;
   }
+
+  // Resolve every node to its app — pure union-find over the ownership edges
+  // (cycle-safe; see resolveOwnership). Unlabelled nodes get an app only if their
+  // component maps to exactly one; ambiguous or app-less -> null (dropped).
+  const view = new Map<string, OwnershipNode>();
+  for (const [uid, n] of nodes) view.set(uid, { ownerRefs: n.ownerRefs, app: n.app });
+  const resolved = resolveOwnership(view);
+
+  const groups = new Map<string, AppResource[]>();
+  const push = (app: string, res: AppResource) => {
+    let l = groups.get(app);
+    if (!l) {
+      l = [];
+      groups.set(app, l);
+    }
+    l.push(res);
+  };
+
+  // Attach bodies we already have; queue fetches for attached children we only
+  // had edges for (the few unlabelled workload children below a labelled owner).
+  const toFetch: { app: string; rel: ChildRel }[] = [];
+  for (const [uid, n] of nodes) {
+    const app = resolved.get(uid);
+    if (!app) continue; // null -> ambiguous or app-less -> drop
+    if (n.res) push(app, n.res);
+    else if (n.rel) toFetch.push({ app, rel: n.rel });
+  }
+  const bodies = await pMap(toFetch, t => fetchBody(t.rel).then(b => ({ app: t.app, b })), 10);
+  for (const { app, b } of bodies) if (b) push(app, b);
 
   appsCache = { at: Date.now(), data: groups };
   return groups;
