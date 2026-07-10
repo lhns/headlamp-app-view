@@ -43,6 +43,19 @@ let discoveryCache: { at: number; data: ApiResource[] } | null = null;
 const DISCOVERY_TTL_MS = 60_000;
 
 /**
+ * Aggregated/virtual API groups to skip. Their objects (e.g. metrics.k8s.io's
+ * PodMetrics) mirror a pod's labels, so they'd otherwise be swept into an app —
+ * but they aren't backed by a CRD/etcd object, so Headlamp has no details view
+ * for them (a click opens a blank panel). They're derived data, not app
+ * resources, so we drop them from discovery entirely.
+ */
+const EXCLUDED_GROUPS = new Set([
+  'metrics.k8s.io',
+  'custom.metrics.k8s.io',
+  'external.metrics.k8s.io',
+]);
+
+/**
  * Enumerate every listable, non-subresource kind the API server exposes — core,
  * every API group's preferred version, and all CRDs. Cached briefly.
  */
@@ -78,6 +91,7 @@ export async function discover(): Promise<ApiResource[]> {
           g.preferredVersion?.groupVersion || g.versions?.[0]?.groupVersion;
         if (!gv || !gv.includes('/')) return;
         const [group, version] = gv.split('/');
+        if (EXCLUDED_GROUPS.has(group)) return;
         try {
           collect(group, version, await request(`/apis/${group}/${version}`));
         } catch (e) {

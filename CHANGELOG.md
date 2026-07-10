@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- Skip aggregated/virtual API groups (`metrics.k8s.io`, `custom.metrics.k8s.io`,
+  `external.metrics.k8s.io`) during discovery. Their objects (e.g. `PodMetrics`)
+  mirror a pod's labels and so were swept into apps, but they have no CRD/details
+  view — clicking one opened a blank panel.
 
 ## [0.1.0] - 2026-07-10
 ### Added
