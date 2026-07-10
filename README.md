@@ -7,11 +7,16 @@ Kubernetes has no native "application" object, so this plugin groups resources b
 standard **`app.kubernetes.io/instance`** label (which most Helm charts already set):
 
 - **Apps tab** — a list of every app in the cluster, with summary columns: version,
-  health, pods, resource count, ingress URL (clickable — a launcher), age.
-- **Per-app page** — for the selected app, one section per resource **kind** with a
-  list under each heading, covering **every kind including CustomResources**. The
-  plugin discovers the cluster's API resources at runtime rather than using a fixed
-  list, so CRDs show up automatically.
+  health, pods, resource count, ingress URL (clickable — a launcher), namespace, age.
+- **Per-app page** — a summary header (the same facts) followed by one section per
+  resource **kind**, each with kind-appropriate columns (mirroring Headlamp's own
+  lists) and a generic fallback for unknown/custom kinds. Covers **every kind
+  including CustomResources** — the plugin discovers the cluster's API resources at
+  runtime rather than using a fixed list, so CRDs show up automatically.
+
+Resources that lack the instance label but are **owned** by a labelled resource
+(e.g. a CNPG `Cluster` behind labelled pods) are pulled in by walking
+`ownerReferences`.
 
 Design decisions live in [`docs/adr/`](docs/adr/).
 
@@ -29,9 +34,53 @@ Point a local Headlamp at your cluster (via a kubeconfig) to test against real d
 
 ## Install (in-cluster)
 
-The plugin ships as a container image; a Headlamp Deployment loads it via an
-initContainer that copies it into the plugins directory (`/headlamp/plugins`),
-coexisting with any `pluginsManager` plugins (see [ADR 0005](docs/adr/0005-distribution-image-initcontainer.md)).
+The plugin ships as a public container image on GHCR
+(`ghcr.io/lhns/headlamp-app-view`) that just carries the built bundle under
+`/plugins/headlamp-app-view/`. A Headlamp Deployment loads it with an
+**initContainer** that copies it into a plugins directory before Headlamp starts
+(see [ADR 0005](docs/adr/0005-distribution-image-initcontainer.md)). The image is
+public, so no pull secret is needed.
+
+### With the official Headlamp Helm chart
+
+If you also run the chart's **`pluginsManager`** (it installs ArtifactHub plugins
+into `/headlamp/plugins` and *prunes anything not in its config* — including this
+plugin), load this one from Headlamp's **separate** `-user-plugins-dir` so the
+pluginsManager never touches it. Add to your `values.yaml`:
+
+```yaml
+config:
+  watchPlugins: true
+  extraArgs:
+    - "-user-plugins-dir=/headlamp/user-plugins"
+
+initContainers:
+  - name: app-view-plugin
+    image: ghcr.io/lhns/headlamp-app-view:0.1.0   # pin a tag
+    command: ["/bin/sh", "-c", "cp -r /plugins/. /headlamp/user-plugins/"]
+    volumeMounts:
+      - name: app-view-plugin
+        mountPath: /headlamp/user-plugins
+
+# a dedicated volume, shared between the initContainer and the main container
+volumes:
+  - name: app-view-plugin
+    emptyDir: {}
+volumeMounts:
+  - name: app-view-plugin
+    mountPath: /headlamp/user-plugins
+```
+
+If you **don't** use the pluginsManager, you can skip `extraArgs` and just copy
+into the main plugins dir instead (`-plugins-dir`, default `/headlamp/plugins`) —
+point both the `command` target and the `volumeMounts` `mountPath` there.
+
+### RBAC
+
+The plugin lists resources across *all* kinds (including CRDs) for the identity
+Headlamp uses, so that identity needs broad cluster read (e.g. the `view`
+ClusterRole, or `cluster-admin` for a homelab). It only ever shows what that
+identity is allowed to `list`.
 
 ## License
 
