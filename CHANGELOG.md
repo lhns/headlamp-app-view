@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.2.0] - 2026-07-10
 ### Added
 - Namespaces are now clickable links (to the namespace's details page) in the
   Apps list, the per-app summary, and the per-kind resource tables.
