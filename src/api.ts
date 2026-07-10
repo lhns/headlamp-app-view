@@ -309,6 +309,37 @@ export interface AppSummary {
   oldest?: string;
 }
 
+type Signal = 'ok' | 'progressing' | 'broken';
+
+/**
+ * Health signal from a workload controller's ready/desired counts. Returns null
+ * for kinds we don't rate or ones scaled to zero (no signal). Lets an app read
+ * healthy from e.g. a Deployment even when its pods aren't in the app group
+ * (unlabelled pod templates).
+ */
+function workloadSignal(r: AppResource): Signal | null {
+  let desired: number | undefined;
+  let ready: number | undefined;
+  switch (r.kind) {
+    case 'Deployment':
+      desired = r.spec?.replicas ?? 1;
+      ready = r.status?.availableReplicas ?? 0;
+      break;
+    case 'StatefulSet':
+      desired = r.spec?.replicas ?? 1;
+      ready = r.status?.readyReplicas ?? 0;
+      break;
+    case 'DaemonSet':
+      desired = r.status?.desiredNumberScheduled ?? 0;
+      ready = r.status?.numberReady ?? 0;
+      break;
+    default:
+      return null;
+  }
+  if (!desired) return null; // scaled to zero — not a health signal
+  return ready === 0 ? 'broken' : ready < desired ? 'progressing' : 'ok';
+}
+
 /** Roll a set of an app's resources up into the summary shown on the Apps list. */
 export function summarize(name: string, resources: AppResource[]): AppSummary {
   const pods = resources.filter(r => r.kind === 'Pod');
@@ -320,11 +351,19 @@ export function summarize(name: string, resources: AppResource[]): AppSummary {
   const timestamps = resources.map(r => r.metadata?.creationTimestamp).filter(Boolean) as string[];
   const oldest = timestamps.length ? timestamps.reduce((a, b) => (a < b ? a : b)) : undefined;
 
-  // Health rollup: broken pods -> Degraded; not-all-ready pods -> Progressing; else Healthy.
+  // Health rollup across both pods and workload controllers (Deployment/
+  // StatefulSet/DaemonSet). Worst signal wins: any broken -> Degraded, any not
+  // fully ready -> Progressing, all ready -> Healthy, nothing to rate -> Unknown.
+  const signals: Signal[] = [];
+  for (const p of pods) signals.push(podIsBroken(p) ? 'broken' : isPodReady(p) ? 'ok' : 'progressing');
+  for (const r of resources) {
+    const s = workloadSignal(r);
+    if (s) signals.push(s);
+  }
   let health: Health = 'Unknown';
-  if (pods.length > 0) {
-    if (pods.some(podIsBroken)) health = 'Degraded';
-    else if (podsReady < pods.length) health = 'Progressing';
+  if (signals.length > 0) {
+    if (signals.includes('broken')) health = 'Degraded';
+    else if (signals.includes('progressing')) health = 'Progressing';
     else health = 'Healthy';
   }
 

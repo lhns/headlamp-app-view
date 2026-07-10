@@ -5,6 +5,7 @@
  * The per-app page: a summary header (the same facts the Apps list shows) plus
  * one section per resource kind, each with kind-appropriate columns.
  */
+import { Router } from '@kinvolk/headlamp-plugin/lib';
 import {
   DateLabel,
   Loader,
@@ -18,6 +19,8 @@ import React from 'react';
 import { useParams } from 'react-router-dom';
 import { AppResource, groupByKind, listApps, orderKinds, summarize } from './api';
 import { columnsForRows, healthStatus } from './columns';
+
+const appsListUrl = Router.createRouteURL('apps');
 
 export function AppDetail() {
   const { name } = useParams<{ name: string }>();
@@ -38,14 +41,14 @@ export function AppDetail() {
 
   if (error) {
     return (
-      <SectionBox title={name} textAlign="left">
+      <SectionBox title={name} textAlign="left" backLink={appsListUrl}>
         <Box color="error.main">Failed to load: {error}</Box>
       </SectionBox>
     );
   }
   if (resources === null) {
     return (
-      <SectionBox title={name} textAlign="left">
+      <SectionBox title={name} textAlign="left" backLink={appsListUrl}>
         <Loader title="Loading app resources…" />
       </SectionBox>
     );
@@ -91,7 +94,7 @@ export function AppDetail() {
 
   return (
     <Box sx={{ pb: 3 }}>
-      <SectionBox title={`App: ${name}`} textAlign="left">
+      <SectionBox title={`App: ${name}`} textAlign="left" backLink={appsListUrl}>
         <NameValueTable rows={summaryRows} />
       </SectionBox>
       {kinds.map(kind => (
