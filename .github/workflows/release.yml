@@ -2,7 +2,8 @@ name: release
 
 # Build the plugin carrier image and push it to GHCR.
 #   push to main   -> ghcr.io/<owner>/headlamp-app-view:sha-<short>
-#   tag vX.Y.Z     -> ghcr.io/<owner>/headlamp-app-view:X.Y.Z + :latest
+#   tag vX.Y.Z     -> ghcr.io/<owner>/headlamp-app-view:X.Y.Z + :latest,
+#                     plus a GitHub Release with the CHANGELOG section as notes.
 on:
   push:
     branches: [main]
@@ -10,7 +11,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  contents: write # create GitHub Releases on tags
   packages: write
 
 jobs:
@@ -24,12 +25,13 @@ jobs:
         run: |
           IMG="ghcr.io/${{ github.repository_owner }}/headlamp-app-view"
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            V="${GITHUB_REF_NAME#v}"
+            V="${GITHUB_REF_NAME#v}" # strip the leading v: git tag v0.1.0 -> image 0.1.0
             echo "tags=${IMG}:${V},${IMG}:latest" >> "$GITHUB_OUTPUT"
           else
             echo "tags=${IMG}:sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           fi
 
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -42,5 +44,26 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.v.outputs.tags }}
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          # Use this version's CHANGELOG.md section as the release body.
+          # index()-based (literal) to avoid regex bracket-escaping pitfalls.
+          awk -v v="$VER" '
+            index($0, "## [" v "]") == 1 { p=1; next }
+            p && index($0, "## [") == 1 { exit }
+            p { print }
+          ' CHANGELOG.md > relnotes.md
+          if [ -s relnotes.md ]; then
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes-file relnotes.md
+          else
+            echo "no CHANGELOG entry for ${VER}; using generated notes" >&2
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
+          fi

@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 
 # ── build the plugin bundle ──────────────────────────────────────────────────
-FROM node:22 AS build
+# The bundle is just JS, so build it once on the native platform even for a
+# multi-arch image (only the tiny alpine carrier below is built per-arch).
+FROM --platform=$BUILDPLATFORM node:22 AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci
