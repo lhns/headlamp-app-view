@@ -21,7 +21,7 @@ import {
   Health,
   INSTANCE_LABEL,
   instanceOf,
-  listAll,
+  listInstances,
   summarize,
 } from './api';
 
@@ -44,7 +44,7 @@ export function AppsList() {
 
   React.useEffect(() => {
     let cancelled = false;
-    listAll(INSTANCE_LABEL)
+    listInstances()
       .then(resources => {
         if (cancelled) return;
         const byApp: Record<string, AppResource[]> = {};
@@ -65,13 +65,14 @@ export function AppsList() {
   }, []);
 
   return (
-    <SectionBox title="Apps" textAlign="left">
+    <SectionBox title="Apps" textAlign="left" sx={{ pb: 3 }}>
       {error ? (
         <Box color="error.main">Failed to load apps: {error}</Box>
       ) : apps === null ? (
         <Loader title="Loading apps…" />
       ) : (
         <SimpleTable
+          rowsPerPage={[50, 100]}
           emptyMessage={`No resources labelled ${INSTANCE_LABEL} were found.`}
           columns={[
             {

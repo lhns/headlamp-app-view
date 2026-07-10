@@ -133,9 +133,26 @@ export async function listAll(labelSelector: string): Promise<AppResource[]> {
         return []; // 403 / 404 / 405 — not listable for us; skip
       }
     },
-    10
+    20
   );
   return lists.flat();
+}
+
+let instancesCache: { at: number; data: AppResource[] } | null = null;
+const INSTANCES_TTL_MS = 30_000;
+
+/**
+ * Every object carrying the instance label, cluster-wide, cached briefly.
+ * Both the Apps list and the per-app detail page read from this single sweep —
+ * so opening an app is instant instead of re-scanning every kind again.
+ */
+export async function listInstances(force = false): Promise<AppResource[]> {
+  if (!force && instancesCache && Date.now() - instancesCache.at < INSTANCES_TTL_MS) {
+    return instancesCache.data;
+  }
+  const data = await listAll(INSTANCE_LABEL);
+  instancesCache = { at: Date.now(), data };
+  return data;
 }
 
 export function instanceOf(r: AppResource): string | undefined {

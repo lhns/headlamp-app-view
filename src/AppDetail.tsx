@@ -14,7 +14,7 @@ import {
 import { Box } from '@mui/material';
 import React from 'react';
 import { useParams } from 'react-router-dom';
-import { AppResource, groupByKind, INSTANCE_LABEL, listAll } from './api';
+import { AppResource, groupByKind, instanceOf, listInstances } from './api';
 import { ResourceLink } from './links';
 
 /** Best-effort readiness text for any resource. */
@@ -44,8 +44,8 @@ export function AppDetail() {
     let cancelled = false;
     setResources(null);
     setError(null);
-    listAll(`${INSTANCE_LABEL}=${name}`)
-      .then(r => !cancelled && setResources(r))
+    listInstances()
+      .then(all => !cancelled && setResources(all.filter(r => instanceOf(r) === name)))
       .catch(e => !cancelled && setError(String(e)));
     return () => {
       cancelled = true;
@@ -81,6 +81,7 @@ export function AppDetail() {
       {kinds.map(kind => (
         <SectionBox key={kind} title={`${kind} (${groups[kind].length})`} textAlign="left">
           <SimpleTable
+            rowsPerPage={[50, 100]}
             columns={[
               { label: 'Name', getter: (r: AppResource) => <ResourceLink item={r} /> },
               { label: 'Namespace', getter: (r: AppResource) => r.metadata?.namespace ?? '—' },
