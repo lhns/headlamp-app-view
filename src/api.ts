@@ -155,6 +155,102 @@ export async function listInstances(force = false): Promise<AppResource[]> {
   return data;
 }
 
+/** Find the discovered kind for an ownerReference (apiVersion + kind). */
+async function resolveKind(apiVersion: string, kind: string): Promise<ApiResource | undefined> {
+  const kinds = await discover();
+  let group = '';
+  let version = apiVersion;
+  if (apiVersion.includes('/')) [group, version] = apiVersion.split('/');
+  return (
+    kinds.find(k => k.kind === kind && k.group === group && k.version === version) ||
+    kinds.find(k => k.kind === kind && k.group === group) // version-agnostic fallback
+  );
+}
+
+const ownerCache = new Map<string, AppResource | null>();
+
+/** Fetch a single object referenced by an ownerReference; null if gone/unreadable. Cached by path. */
+async function fetchOwner(ref: any, childNamespace?: string): Promise<AppResource | null> {
+  if (!ref?.kind || !ref?.name) return null;
+  const rk = await resolveKind(ref.apiVersion || 'v1', ref.kind);
+  if (!rk) return null;
+  const base = rk.group ? `/apis/${rk.group}/${rk.version}` : `/api/${rk.version}`;
+  const path = rk.namespaced
+    ? `${base}/namespaces/${childNamespace}/${rk.plural}/${ref.name}`
+    : `${base}/${rk.plural}/${ref.name}`;
+  if (ownerCache.has(path)) return ownerCache.get(path)!;
+
+  let obj: AppResource | null = null;
+  try {
+    const it = await request(path);
+    if (it?.metadata) {
+      obj = {
+        ...it,
+        kind: it.kind || rk.kind,
+        apiVersion: it.apiVersion || (rk.group ? `${rk.group}/${rk.version}` : rk.version),
+        group: rk.group,
+        plural: rk.plural,
+      };
+    }
+  } catch (e) {
+    obj = null; // 403 / 404 — skip
+  }
+  ownerCache.set(path, obj);
+  return obj;
+}
+
+let appsCache: { at: number; data: Map<string, AppResource[]> } | null = null;
+const OWNER_WALK_BUDGET = 50; // max owner fetches per app, a runaway guard
+
+/**
+ * The apps, keyed by instance label, each enriched by walking ownerReferences
+ * upward to include unlabelled parents (e.g. a CNPG Cluster owning labelled
+ * pods). Owners already present via their own label are not refetched.
+ */
+export async function listApps(force = false): Promise<Map<string, AppResource[]>> {
+  if (!force && appsCache && Date.now() - appsCache.at < INSTANCES_TTL_MS) {
+    return appsCache.data;
+  }
+
+  const resources = await listInstances(force);
+  const groups = new Map<string, AppResource[]>();
+  const seen = new Set<string>(); // uids already attributed to some app
+
+  for (const r of resources) {
+    const app = instanceOf(r);
+    if (!app) continue;
+    if (r.metadata?.uid) seen.add(r.metadata.uid);
+    const list = groups.get(app) ?? [];
+    if (!groups.has(app)) groups.set(app, list);
+    list.push(r);
+  }
+
+  for (const list of groups.values()) {
+    const queue = [...list];
+    let budget = OWNER_WALK_BUDGET;
+    while (queue.length && budget > 0) {
+      const cur = queue.shift()!;
+      for (const ref of cur.metadata?.ownerReferences ?? []) {
+        if (ref.uid && seen.has(ref.uid)) continue; // already have it (likely labelled itself)
+        if (budget <= 0) break;
+        budget--;
+        const owner = await fetchOwner(ref, cur.metadata?.namespace);
+        const ouid = owner?.metadata?.uid;
+        if (!owner || (ouid && seen.has(ouid))) {
+          if (ref.uid) seen.add(ref.uid);
+          continue;
+        }
+        if (ouid) seen.add(ouid);
+        list.push(owner);
+        queue.push(owner); // keep walking up (parent's parent, …)
+      }
+    }
+  }
+
+  appsCache = { at: Date.now(), data: groups };
+  return groups;
+}
+
 export function instanceOf(r: AppResource): string | undefined {
   return r.metadata?.labels?.[INSTANCE_LABEL];
 }
@@ -252,4 +348,53 @@ export function groupByKind(resources: AppResource[]): Record<string, AppResourc
     (groups[r.kind] ||= []).push(r);
   }
   return groups;
+}
+
+/**
+ * Preferred order for the per-kind sections on the detail page: what you most
+ * want to see first — the workloads and their pods, then how they're reached,
+ * then their config/storage, then policy and RBAC. Kinds not listed here are
+ * appended alphabetically. Edit this list to reorder; it's the single source.
+ */
+export const PREFERRED_KIND_ORDER = [
+  // primary workloads
+  'Deployment',
+  'StatefulSet',
+  'DaemonSet',
+  // running instances
+  'Pod',
+  // secondary workloads
+  'ReplicaSet',
+  'CronJob',
+  'Job',
+  // networking / how the app is reached
+  'Service',
+  'Ingress',
+  'IngressRoute',
+  'HTTPRoute',
+  'Endpoints',
+  'EndpointSlice',
+  // config & storage
+  'ConfigMap',
+  'Secret',
+  'PersistentVolumeClaim',
+  // scaling & disruption
+  'HorizontalPodAutoscaler',
+  'PodDisruptionBudget',
+  // identity & RBAC
+  'ServiceAccount',
+  'Role',
+  'RoleBinding',
+  'ClusterRole',
+  'ClusterRoleBinding',
+];
+
+/** Order kinds by PREFERRED_KIND_ORDER first, then everything else alphabetically. */
+export function orderKinds(kinds: string[]): string[] {
+  const rank = new Map(PREFERRED_KIND_ORDER.map((k, i) => [k, i]));
+  return [...kinds].sort((a, b) => {
+    const ra = rank.has(a) ? rank.get(a)! : Infinity;
+    const rb = rank.has(b) ? rank.get(b)! : Infinity;
+    return ra !== rb ? ra - rb : a.localeCompare(b);
+  });
 }

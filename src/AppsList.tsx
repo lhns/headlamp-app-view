@@ -15,15 +15,7 @@ import {
 } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
 import { Box, Link as MuiLink } from '@mui/material';
 import React from 'react';
-import {
-  AppResource,
-  AppSummary,
-  Health,
-  INSTANCE_LABEL,
-  instanceOf,
-  listInstances,
-  summarize,
-} from './api';
+import { AppSummary, Health, INSTANCE_LABEL, listApps, summarize } from './api';
 
 function healthStatus(h: Health): 'success' | 'warning' | 'error' | '' {
   switch (h) {
@@ -44,16 +36,10 @@ export function AppsList() {
 
   React.useEffect(() => {
     let cancelled = false;
-    listInstances()
-      .then(resources => {
+    listApps()
+      .then(groups => {
         if (cancelled) return;
-        const byApp: Record<string, AppResource[]> = {};
-        for (const r of resources) {
-          const app = instanceOf(r);
-          if (!app) continue;
-          (byApp[app] ||= []).push(r);
-        }
-        const summaries = Object.entries(byApp)
+        const summaries = Array.from(groups.entries())
           .map(([name, res]) => summarize(name, res))
           .sort((a, b) => a.name.localeCompare(b.name));
         setApps(summaries);

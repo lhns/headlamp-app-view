@@ -14,7 +14,7 @@ import {
 import { Box } from '@mui/material';
 import React from 'react';
 import { useParams } from 'react-router-dom';
-import { AppResource, groupByKind, instanceOf, listInstances } from './api';
+import { AppResource, groupByKind, listApps, orderKinds } from './api';
 import { ResourceLink } from './links';
 
 /** Best-effort readiness text for any resource. */
@@ -44,8 +44,8 @@ export function AppDetail() {
     let cancelled = false;
     setResources(null);
     setError(null);
-    listInstances()
-      .then(all => !cancelled && setResources(all.filter(r => instanceOf(r) === name)))
+    listApps()
+      .then(groups => !cancelled && setResources(groups.get(name!) ?? []))
       .catch(e => !cancelled && setError(String(e)));
     return () => {
       cancelled = true;
@@ -68,10 +68,10 @@ export function AppDetail() {
   }
 
   const groups = groupByKind(resources);
-  const kinds = Object.keys(groups).sort();
+  const kinds = orderKinds(Object.keys(groups));
 
   return (
-    <>
+    <Box sx={{ pb: 3 }}>
       <SectionBox title={`App: ${name}`} textAlign="left">
         <Box>
           {resources.length} resource{resources.length === 1 ? '' : 's'} across {kinds.length} kind
@@ -100,6 +100,6 @@ export function AppDetail() {
           />
         </SectionBox>
       ))}
-    </>
+    </Box>
   );
 }
