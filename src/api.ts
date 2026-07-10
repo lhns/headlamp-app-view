@@ -233,6 +233,7 @@ export async function listApps(force = false): Promise<Map<string, AppResource[]
   for (const r of resources) {
     const app = instanceOf(r);
     if (!app) continue;
+    if (isSupersededReplicaSet(r)) continue;
     if (r.metadata?.uid) seen.add(r.metadata.uid);
     const list = groups.get(app) ?? [];
     if (!groups.has(app)) groups.set(app, list);
@@ -267,6 +268,19 @@ export async function listApps(force = false): Promise<Map<string, AppResource[]
 
 export function instanceOf(r: AppResource): string | undefined {
   return r.metadata?.labels?.[INSTANCE_LABEL];
+}
+
+/**
+ * A superseded ReplicaSet — an old Deployment revision kept for rollback history
+ * (spec.replicas 0 and no live pods). Deployments hoard up to revisionHistoryLimit
+ * of these, which just clutters an app view, so we drop them.
+ */
+function isSupersededReplicaSet(r: AppResource): boolean {
+  return (
+    r.kind === 'ReplicaSet' &&
+    (r.spec?.replicas ?? 0) === 0 &&
+    (r.status?.replicas ?? 0) === 0
+  );
 }
 
 function firstLabel(resources: AppResource[], label: string): string | undefined {

@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format is based on
   `external.metrics.k8s.io`) during discovery. Their objects (e.g. `PodMetrics`)
   mirror a pod's labels and so were swept into apps, but they have no CRD/details
   view — clicking one opened a blank panel.
+- Drop superseded ReplicaSets (old Deployment revisions kept for rollback,
+  scaled to `0/0`) from apps — they were cluttering the resource list.
 
 ## [0.1.0] - 2026-07-10
 ### Added
