@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.3.0] - 2026-07-11
 ### Changed
 - App enrichment now resolves the ownership graph in **both** directions —
   unlabelled parents above labelled resources (a CNPG `Cluster`) *and* unlabelled

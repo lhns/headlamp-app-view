@@ -1,6 +1,6 @@
 {
   "name": "headlamp-app-view",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Headlamp plugin — an application view: lists apps (grouped by the app.kubernetes.io/instance label) and, per app, every resource kind it owns (including CRDs).",
   "license": "Apache-2.0",
   "author": "Pierre Kisters",
