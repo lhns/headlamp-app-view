@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-22
+### Security
+- Carrier image base `alpine:3.20` (EOL) -> `alpine:3.24.3`, whose CA bundle
+  (`ca-certificates` 20261020) drops "emSign ECC Root CA - G3" after the eMudhra
+  intermediate-CA key compromise.
+
 ## [0.3.0] - 2026-07-11
 ### Changed
 - App enrichment now resolves the ownership graph in **both** directions —

@@ -13,7 +13,7 @@ RUN npm run build
 # ── carrier image ────────────────────────────────────────────────────────────
 # Just holds the built plugin under /plugins/<name>/. A Headlamp Deployment's
 # initContainer copies /plugins/* into its plugins dir (this image never "runs").
-FROM alpine:3.20
+FROM alpine:3.24.3
 RUN mkdir -p /plugins/headlamp-app-view
 COPY --from=build /src/dist/main.js /plugins/headlamp-app-view/main.js
 COPY --from=build /src/package.json /plugins/headlamp-app-view/package.json
